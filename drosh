@@ -1,0 +1,137 @@
+#!/bin/sh -e
+#
+# drosh - simple droplet management
+
+die() {
+    printf 'error: %s.\n' "$1" >&2
+    exit 1
+}
+
+yn() {
+    printf '%s [y/n]: ' "$1"
+    stty -icanon
+    answer=$(dd ibs=1 count=1 2>/dev/null)
+    stty icanon
+    printf '\n'
+    glob "$answer" '[yY]'
+}
+
+docurl() {
+    curl --fail --silent --show-error \
+        -H 'Content-Type: application/json' \
+        -H "Authorization: Bearer $DIGITALOCEAN_ACCESS_TOKEN" \
+        "$@"
+}
+
+glob() {
+    # shellcheck disable=2254
+    case $1 in $2) return 0; esac; return 1
+}
+
+usage() { printf %s "\
+  drosh
+    simple droplet management
+
+  commands:
+    [c]reate [name] - Create a droplet
+    [d]elete [id]   - Delete a droplet
+    [s]how   [id]   - Show info about a droplet
+    [l]ist          - List all droplets
+
+  env vars:
+    DROSH_CREATE_DRY_RUN=false
+    DROSH_CREATE_IMAGE=ubuntu-22-04-x64
+    DROSH_CREATE_REGION=nyc3
+    DROSH_CREATE_SIZE=s-1vcpu-1gb
+    DROSH_CREATE_USERDATA=
+"
+exit 0
+}
+
+fetch_all_ssh_keys() {
+    keys="$(docurl "${DROSH_API_URL}/v2/account/keys" | jq '.ssh_keys | map(.fingerprint)')"
+    printf '"ssh_keys": %s' "$keys"
+    printf ','
+}
+
+generate_create_json() {
+    printf '{
+      "image":  "%s",
+      "name":   "%s",
+      "region": "%s",
+      "size":   "%s",
+      %s
+      "user_data": "%s"
+    }' \
+    "${DROSH_CREATE_IMAGE:=ubuntu-22-04-x64}" \
+    "$1"                                      \
+    "${DROSH_CREATE_REGION:=nyc3}"            \
+    "${DROSH_CREATE_SIZE:=s-1vcpu-1gb}"       \
+    "$(fetch_all_ssh_keys)"                   \
+    "${DROSH_CREATE_USERDATA:=null}"
+}
+
+drosh_create() {
+    json="$(generate_create_json "$1")"
+    if [ -n "${DROSH_CREATE_DRY_RUN}" ] && [ "$DROSH_CREATE_DRY_RUN" != "false" ]; then
+        printf "%s\n" "$json"
+        exit 0
+    fi
+    id="$(docurl -X POST -d "$json" "${DROSH_API_URL}/v2/droplets" | jq .droplet.id)"
+    printf '%s\n' "$id"
+}
+
+drosh_delete() {
+    if yn "delete $1"; then
+        docurl -X DELETE "${DROSH_API_URL}/v2/droplets/$1"
+    fi
+}
+
+drosh_list() {
+    # ignore pagination since 200 is plenty for personal use
+    docurl "${DROSH_API_URL}/v2/droplets?per_page=200" |
+        jq -r '.droplets[] | "\(.id) \(.name)"'
+}
+
+drosh_show() {
+    # may god have mercy on my soul
+    docurl "${DROSH_API_URL}/v2/droplets/$1" | jq -r '.droplet | "     ID \(.id)\n   NAME \(.name)\n REGION \(.region.slug)\n STATUS \(.status)\nCREATED \(.created_at)\n  IMAGE \(.image.distribution) \(.image.name)\n   SIZE \(.size_slug)\n PUBLIC \(.networks.v4[0] | .ip_address)\nPRIVATE \(.networks.v4[1] | .ip_address)"'
+}
+
+main() {
+    [ -z "$DIGITALOCEAN_ACCESS_TOKEN" ] && die "you must set DIGITALOCEAN_ACCESS_TOKEN"
+
+    : "${DROSH_API_URL:=https://api.digitalocean.com}"
+
+    command -v curl >/dev/null 2>&1 ||
+        die "curl not found, install per https://curl.se"
+
+    command -v jq >/dev/null 2>&1 ||
+        die "jq not found, install per https://stedolan.github.io/jq/download"
+
+    glob "$1" '[c]*' && [ -z "$2" ] &&
+        die "Missing [name] argument"
+
+    glob "$1" '[ds]*' && [ -z "$2" ] &&
+        die "Missing [id] argument"
+
+    glob "$1" '[ds]*' && glob "$2" '[A-z]*' &&
+        die "Invalid droplet ID, droplet IDs are numeric"
+
+    # Ensure that we leave the terminal in a usable
+    # state on exit or Ctrl+C.
+    [ -t 1 ] && trap 'stty echo icanon' INT EXIT
+
+    case $1 in
+        c*) drosh_create "$2" ;;
+        d*) drosh_delete "$2" ;;
+        s*) drosh_show   "$2" ;;
+        l*) drosh_list        ;;
+        *)  usage
+    esac
+}
+
+# no leaky secrets
+set +x
+
+[ "$1" ] || usage && main "$@"

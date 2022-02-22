@@ -1,0 +1,43 @@
+             drosh
+      a little droplet manager💧
+
+  features
+    - create, delete, and list droplets
+    - show droplet info
+    - written in portable POSIX shell
+    - simple to hack on & work with
+    - env var based configuration
+    - ~120 SLOC
+
+  dependencies
+    - a POSIX-compliant shell
+    - curl
+    - jq (for json manipulation)
+    - a DigitalOcean account with at least 1 ssh key
+
+  usage
+    $ drosh help
+    drosh
+      simple droplet management
+
+    commands:
+      [c]reate [name] - Create a droplet
+      [d]elete [id]   - Delete a droplet
+      [s]how   [id]   - Show info about a droplet
+      [l]ist          - List all droplets
+
+    env vars:
+      DROSH_CREATE_DRY_RUN=false
+      DROSH_CREATE_IMAGE=ubuntu-22-04-x64
+      DROSH_CREATE_REGION=nyc3
+      DROSH_CREATE_SIZE=s-1vcpu-1gb
+      DROSH_CREATE_USERDATA=
+
+  q&a
+    > how do i use drosh + cloudinit?
+      export DROSH_CREATE_USERDATA='#cloud-config\nruncmd:\n - touch /test.txt\n'
+      drosh create mydroplet
+
+    > is this project supported by DigitalOcean?
+      while drosh is not officially supported, I will be supporting
+      it to the best of my ability!! -j3s
